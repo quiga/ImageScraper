@@ -6,12 +6,12 @@ from lxml import html
 import requests
 from urllib.parse import urlparse, urljoin
 from past.utils import old_div
+from goldfinch import validFileName as vfn
 import os
 import argparse
 import re
 from .exceptions import PageLoadError, DirectoryAccessError,\
                         DirectoryCreateError, ImageDownloadError, ImageSizeError
-
 
 class ImageScraper(object):
     """ Scraper class. """
@@ -31,6 +31,7 @@ class ImageScraper(object):
         self.page_url = None
         self.proxy_url = None
         self.proxies = {}
+        self.useTitle = False
 
     def get_arguments(self):
         """ Gets the arguments from the command line. """
@@ -62,6 +63,9 @@ class ImageScraper(object):
                                   match the given regex pattern")
         parser.add_argument('--nthreads', type=int, default=10,
                             help="The number of threads to use when downloading images.")
+        parser.add_argument('-t', '--use-title-as-subfolder-name', default=False,
+                            help="Use the title of page as subfolder's name",
+                            action="store_true")
         args = parser.parse_args()
         self.url = args.url2scrape[0]
         if not re.match(r'^[a-zA-Z]+://', self.url):
@@ -87,6 +91,7 @@ class ImageScraper(object):
                 self.proxy_url[:(proxy_start_length - 3)]: self.proxy_url
             }
 
+        self.useTitle = args.use_title_as_subfolder_name
         self.scrape_reverse = args.scrape_reverse
         self.filename_pattern = args.filename_pattern
         self.nthreads = args.nthreads
@@ -140,6 +145,14 @@ class ImageScraper(object):
         img_links = self.process_links(links)
         img_list.extend(img_links)
 
+        if self.useTitle:
+            title = tree.xpath('//title')
+            if title:
+                title = vfn(title[0].text)
+                title = title.encode('ascii', 'ignore')
+                if title:
+                    self.download_path = os.path.join(self.download_path, title)
+
         if self.filename_pattern:
             # Compile pattern for efficiency
             pattern = re.compile(self.filename_pattern)
@@ -168,10 +181,15 @@ class ImageScraper(object):
             It checks if the path exists and the scraper has
             write permissions.
         """
+        if self.useTitle:
+            dirname = os.path.dirname(os.path.dirname(self.download_path))
+        else:
+            dirname = os.path.dirname(self.download_path)
+
         if os.path.exists(self.download_path):
             if not os.access(self.download_path, os.W_OK):
                 raise DirectoryAccessError
-        elif os.access(os.path.dirname(self.download_path), os.W_OK):
+        elif os.access(dirname, os.W_OK):
             os.makedirs(self.download_path)
         else:
             raise DirectoryCreateError
